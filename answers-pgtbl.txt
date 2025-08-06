@@ -1,0 +1,7 @@
+Add a new feature to xv6 that detects access bits in the RISC-V page tables and reports this information to userspace. 
+The RISC-V hardware page walker marks these bits in the PTE when resolving a TLB miss. 
+Implement the pgaccess() system call to report which pages have been accessed. 
+This system call requires three parameters. 
+First, it takes the starting virtual address of the first user page to be checked. 
+Second, it takes the number of pages to be checked. 
+Finally, it takes the user address of a buffer and stores the result in a bitmask (a data structure that uses one bit per page, with the first page corresponding to the least significant bit).
