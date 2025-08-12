@@ -51,6 +51,9 @@
 // in both user and kernel space.
 #define TRAMPOLINE (MAXVA - PGSIZE)
 
+// the minimum address the mmap can ues - lab10
+#define MMAPMINADDR (TRAPFRAME - 10 * PGSIZE)
+
 // map kernel stacks beneath the trampoline,
 // each surrounded by invalid guard pages.
 #define KSTACK(p) (TRAMPOLINE - ((p)+1)* 2*PGSIZE)
