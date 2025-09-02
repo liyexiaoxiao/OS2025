@@ -98,51 +98,31 @@ e1000_transmit(struct mbuf *m)
   //
   // Your code here.
   acquire(&e1000_lock);
-  //printf("e1000_transmit: called mbuf=%p\n",m);
-  uint32 idx = regs[E1000_TDT];
-  if (tx_ring[idx].status != E1000_TXD_STAT_DD)
-  {
-    printf("e1000_transmit: tx queue full\n");
-    // __sync_synchronize();
-    release(&e1000_lock);
-    return -1;
-  } else {
-    if (tx_mbufs[idx] != 0)
-    {
-      mbuffree(tx_mbufs[idx]);
-    }
-    tx_ring[idx].addr = (uint64) m->head;
-    tx_ring[idx].length = (uint16) m->len;
-    tx_ring[idx].cso = 0;
-    tx_ring[idx].css = 0;
-    tx_ring[idx].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
-    tx_mbufs[idx] = m;
-    regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+
+  uint32 cur_idx = regs[E1000_TDT];
+
+  if (tx_ring[cur_idx].status != E1000_TXD_STAT_DD) {
+      printf("e1000_transmit: transmit queue full\n");
+      release(&e1000_lock);
+      return -1;
+  } 
+  else {
+      if (tx_mbufs[cur_idx] != 0) {
+          mbuffree(tx_mbufs[cur_idx]);
+      }
+      //set/net
+      tx_ring[cur_idx].addr   = (uint64)m->head;
+      tx_ring[cur_idx].length = (uint16)m->len;
+      tx_ring[cur_idx].cso    = 0;
+      tx_ring[cur_idx].css    = 0;
+      tx_ring[cur_idx].cmd    = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+
+      tx_mbufs[cur_idx] = m;
+      regs[E1000_TDT] = (cur_idx + 1) % TX_RING_SIZE;    // refresh
   }
-  // __sync_synchronize();
-  release(&e1000_lock);
-  return 0;
 
-  // acquire(&e1000_lock);
-  // uint reg_tdt = regs[E1000_TDT];
-
-  // // If the previous buf has not been sent,return error.
-  // if((tx_ring[reg_tdt].status & E1000_TXD_STAT_DD) == 0){
-  //     return -1;
-  // }
-
-  // // free the old buffer
-  // if(tx_mbufs[reg_tdt] != 0)
-  //   mbuffree(tx_mbufs[reg_tdt]);
-
-  // tx_mbufs[reg_tdt] = m;
-  // tx_ring[reg_tdt].length = m->len;
-  // tx_ring[reg_tdt].addr = (uint64)(m->head);
-  // tx_ring[reg_tdt].cmd = 9;
-
-  // regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
-  // release(&e1000_lock);
-  // return 0;
+release(&e1000_lock);
+return 0;
 }
 
 extern void net_rx(struct mbuf *);
@@ -151,52 +131,30 @@ e1000_recv(void)
 {
   //
   // Your code here.
-  uint32 idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
-  struct rx_desc* dest = &rx_ring[idx];
-  while (rx_ring[idx].status & E1000_RXD_STAT_DD)
-  {
+  uint32 cur_idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc *desc = &rx_ring[cur_idx];
+  
+  while (rx_ring[cur_idx].status & E1000_RXD_STAT_DD) {
     acquire(&e1000_lock);
-    struct mbuf *buf = rx_mbufs[idx];
-    mbufput(buf, dest->length);
-    if (!(rx_mbufs[idx] = mbufalloc(0)))
-      panic("mbuf alloc failed");
-    dest->addr = (uint64)rx_mbufs[idx]->head;
-    dest->status = 0;
-    regs[E1000_RDT] = idx;
-    // __sync_synchronize();
+
+    struct mbuf *pkt = rx_mbufs[cur_idx];
+    mbufput(pkt, desc->length);
+    // new mbuf
+    rx_mbufs[cur_idx] = mbufalloc(0);
+    if (!rx_mbufs[cur_idx]) {
+      panic("mbuf allocation failed");
+    }
+    desc->addr   = (uint64)rx_mbufs[cur_idx]->head;
+    desc->status = 0;
+    regs[E1000_RDT] = cur_idx;
+
     release(&e1000_lock);
-    net_rx(buf);
-    idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
-    dest = &rx_ring[idx];
+    net_rx(pkt);
+    // move
+    cur_idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+    desc = &rx_ring[cur_idx];
   }
-  // uint reg_rdt = regs[E1000_RDT];
-  // int i = (reg_rdt + 1)%RX_RING_SIZE;
 
-  // while(rx_ring[i].status & E1000_RXD_STAT_DD){
-  //     rx_mbufs[i]->len = rx_ring[i].length;
-  //     net_rx(rx_mbufs[i]);
-  //     if((rx_mbufs[i] = mbufalloc(0)) == 0)
-  //         panic("e1000");
-  //     rx_ring[i].addr = (uint64)rx_mbufs[i]->head;
-  //     rx_ring[i].status = 0;
-  //     i = (i + 1) % RX_RING_SIZE;
-  // }
-
-  // if(i == 0)
-  //     i = RX_RING_SIZE;
-  // regs[E1000_RDT] = (i - 1) % RX_RING_SIZE;
-
-  // uint32 tail = regs[E1000_RDT];
-  // int i = (tail+1)%RX_RING_SIZE;
-  // while((rx_ring[i].status & 1) == E1000_RXD_STAT_DD){
-  //   rx_mbufs[i]->len = rx_ring[i].length;
-  //   net_rx(rx_mbufs[i]);
-  //   rx_mbufs[i] = mbufalloc(0) ;
-  //   rx_ring[i].addr = (uint64)rx_mbufs[i]->head;
-  //   rx_ring[i].status = 0;
-  //   i = (i+1)%RX_RING_SIZE;
-  // }
-  // regs[E1000_RDT] = i-1;
 }
 
 
