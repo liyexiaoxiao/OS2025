@@ -106,10 +106,10 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   //------trap
-  int alarminterval; // sys_sigalarm() alarm interval in ticks
-  int alarmticks; // sys_sigalarm() alarm interval in ticks
-  void (*alarmhandler)(); // sys_sigalarm() pointer to the alarm handler
-  struct trapframe alarmtrapframe; // for saving registers
+  int alarminterval; 
+  int alarmticks; 
+  void (*alarmhandler)(); 
+  struct trapframe alarmtrapframe; // saving 
   int sigreturned;
 };
 

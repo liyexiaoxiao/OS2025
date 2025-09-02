@@ -100,23 +100,31 @@ sys_uptime(void)
 uint64
 sys_sigalarm(void)
 {
-	int ticks;
-	uint64 handler;
-	struct proc *p = myproc();
-	if(argint(0, &ticks) < 0 || argaddr(1, &handler) < 0)
-	return -1;
-	p->alarminterval = ticks;
-	p->alarmhandler = (void (*)())handler;
-	p->alarmticks = 0;
-	return 0;
+    struct proc *curproc = myproc();
+    int interval;
+    uint64 func_addr;
+
+    // return error
+    if (argint(0, &interval) < 0 || argaddr(1, &func_addr) < 0) {
+        return -1;
+    }
+
+    curproc->alarminterval = interval;
+    curproc->alarmhandler  = (void (*)())func_addr;
+    curproc->alarmticks    = 0;
+
+    return 0;
 }
 
 uint64
 sys_sigreturn(void)
 {
-  struct proc *p = myproc();
-  p->sigreturned = 1;
-  *(p->trapframe) = p->alarmtrapframe;
-  usertrapret();
-  return 0;
+    struct proc *curproc = myproc();
+
+    curproc->sigreturned = 1;
+    // trapframe
+    *curproc->trapframe = curproc->alarmtrapframe;
+
+    usertrapret();
+    return 0;
 }
