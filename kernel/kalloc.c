@@ -26,13 +26,12 @@ struct {
 void
 kinit()
 {
-  char buf[10];
-  for (int i = 0; i < NCPU; i++)
-  {
-    snprintf(buf, 10, "kmem_CPU%d", i);
-    initlock(&kmem[i].lock, buf);
+  char name_buf[10];
+  for (int cpu = 0; cpu < NCPU; cpu++) {
+    snprintf(name_buf, sizeof(name_buf), "kmem_CPU%d", cpu);
+    initlock(&kmem[cpu].lock, name_buf);
   }
-  freerange(end, (void*)PHYSTOP);
+
 }
 void
 freerange(void *pa_start, void *pa_end)
@@ -59,14 +58,15 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
   push_off();
-  int cpu = cpuid();
+  int cur_cpu = cpuid();
   pop_off();
-  acquire(&kmem[cpu].lock);
-  r->next = kmem[cpu].freelist;
-  kmem[cpu].freelist = r;
-  release(&kmem[cpu].lock);
+
+  acquire(&kmem[cur_cpu].lock);
+  r->next = kmem[cur_cpu].freelist;
+  kmem[cur_cpu].freelist = r;
+  release(&kmem[cur_cpu].lock);
+
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -80,42 +80,50 @@ kalloc(void)
   push_off();
   int cpu = cpuid();
   pop_off();
-
   acquire(&kmem[cpu].lock);
   r = kmem[cpu].freelist;
   if(r)
     kmem[cpu].freelist = r->next;
-  else // steal page from other CPU
-  {
-    struct run* tmp;
-    for (int i = 0; i < NCPU; ++i)
-    {
-      if (i == cpu) continue;
-      acquire(&kmem[i].lock);
-      tmp = kmem[i].freelist;
-      if (tmp == 0) {
-        release(&kmem[i].lock);
-        continue;
-      } else {
-        for (int j = 0; j < 1024; j++) {
-          // steal 1024 pages
-          if (tmp->next)
-            tmp = tmp->next;
-          else
-            break;
-        }
-        kmem[cpu].freelist = kmem[i].freelist;
-        kmem[i].freelist = tmp->next;
-        tmp->next = 0;
-        release(&kmem[i].lock);
-        break;
+  kmem[cur_cpu].freelist = r->next;
+  else { 
+  //steal page from other cpu
+  struct run *tmp_run;
+  for (int i = 0; i < NCPU; i++) {
+    if (i == cur_cpu) 
+      continue;
+
+    acquire(&kmem[i].lock);
+    tmp_run = kmem[i].freelist;
+
+    if (tmp_run == 0) {
+      release(&kmem[i].lock);
+      continue;
+    } else {
+      // most --1024
+      struct run *last = tmp_run;
+      for (int j = 0; j < 1024; j++) {
+        if (last->next)
+          last = last->next;
+        else
+          break;
       }
+
+      kmem[cur_cpu].freelist = kmem[i].freelist;
+      kmem[i].freelist = last->next;
+      last->next = 0;
+
+      release(&kmem[i].lock);
+      break;
     }
-    r = kmem[cpu].freelist;
-    if (r)
-      kmem[cpu].freelist = r->next;
   }
-  release(&kmem[cpu].lock);
+
+  r = kmem[cur_cpu].freelist;
+  if (r)
+    kmem[cur_cpu].freelist = r->next;
+}
+
+release(&kmem[cur_cpu].lock);
+
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
