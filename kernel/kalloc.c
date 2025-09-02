@@ -9,9 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
-// the reference count of physical memory page
-int useReference[PHYSTOP/PGSIZE];
-struct spinlock ref_count_lock;
+int useReference[PHYSTOP/PGSIZE];//ref cow
+struct spinlock ref_count_lock;//ref cow
 
 void freerange(void *pa_start, void *pa_end);
 
@@ -57,12 +56,17 @@ kfree(void *pa)
 
   int temp;
   acquire(&ref_count_lock);
-  // decrease the reference count, if use reference is not zero, then return
-  useReference[(uint64)pa/PGSIZE] -= 1;
-  temp = useReference[(uint64)pa/PGSIZE];
+  //---cow
+  int idx = (uint64)pa / PGSIZE;
+  useReference[idx]--;
+
+  int cur_ref = useReference[idx];
   release(&ref_count_lock);
-  if (temp > 0)
-    return;
+
+  if (cur_ref != 0) {
+      return;
+  }
+
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -85,13 +89,17 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r){
-      kmem.freelist = r->next;
+if (r) {
+    // take one page
+    kmem.freelist = r->next;
+
     acquire(&ref_count_lock);
-    // initialization the ref count to 1
-    useReference[(uint64)r / PGSIZE] = 1;
+    // inital
+    int page_index = (uint64)r / PGSIZE;
+    useReference[page_index] = 1;
     release(&ref_count_lock);
-  }
+}
+
   release(&kmem.lock);
 
   if(r)
