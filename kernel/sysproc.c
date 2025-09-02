@@ -7,9 +7,10 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
-#include "proc.h"
 #include "fcntl.h"
 #include "file.h"
+#include "proc.h"
+
 
 uint64
 sys_exit(void)

@@ -15,10 +15,10 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
-#include "memlayout.h"  // lab10
+#include "memlayout.h"  
 
-#define max(a, b) ((a) > (b) ? (a) : (b))   // lab10
-#define min(a, b) ((a) < (b) ? (a) : (b))   // lab10
+#define max(a, b) ((a) > (b) ? (a) : (b))   
+#define min(a, b) ((a) < (b) ? (a) : (b))   
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -489,34 +489,34 @@ sys_pipe(void)
   return 0;
 }
 
-// lab10
+// mmap
 uint64 sys_mmap(void) {
   uint64 addr;
-  int len, prot, flags, offset;
-  struct file *f;
+  int length, prot, flags, offset;
+  struct file *file_ptr;
   struct vm_area *vma = 0;
   struct proc *p = myproc();
   int i;
 
-  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0
       || argint(2, &prot) < 0 || argint(3, &flags) < 0
-      || argfd(4, 0, &f) < 0 || argint(5, &offset) < 0) {
-    return -1;
-  }
-  if (flags != MAP_SHARED && flags != MAP_PRIVATE) {
-    return -1;
-  }
-  // the file must be written when flag is MAP_SHARED
-  if (flags == MAP_SHARED && f->writable == 0 && (prot & PROT_WRITE)) {
-    return -1;
-  }
-  // offset must be a multiple of the page size
-  if (len < 0 || offset < 0 || offset % PGSIZE) {
+      || argfd(4, 0, &file_ptr) < 0 || argint(5, &offset) < 0) {
     return -1;
   }
 
-  // allocate a VMA for the mapped memory
-  for (i = 0; i < NVMA; ++i) {
+  if (flags != MAP_SHARED && flags != MAP_PRIVATE) {
+    return -1;
+  }
+
+  if (flags == MAP_SHARED && !file_ptr->writable && (prot & PROT_WRITE)) {
+    return -1;
+  }
+
+  if (length < 0 || offset < 0 || offset % PGSIZE) {
+    return -1;
+  }
+
+  for (i = 0; i < NVMA; i++) {
     if (!p->vma[i].addr) {
       vma = &p->vma[i];
       break;
@@ -526,51 +526,47 @@ uint64 sys_mmap(void) {
     return -1;
   }
 
-  // assume that addr will always be 0, the kernel
-  //choose the page-aligned address at which to create
-  //the mapping
   addr = MMAPMINADDR;
-  for (i = 0; i < NVMA; ++i) {
+  for (i = 0; i < NVMA; i++) {
     if (p->vma[i].addr) {
-      // get the max address of the mapped memory
       addr = max(addr, p->vma[i].addr + p->vma[i].len);
     }
   }
   addr = PGROUNDUP(addr);
-  if (addr + len > TRAPFRAME) {
+  if (addr + length > TRAPFRAME) {
     return -1;
   }
+
+  // inital VMA
   vma->addr = addr;
-  vma->len = len;
+  vma->len = length;
   vma->prot = prot;
   vma->flags = flags;
   vma->offset = offset;
-  vma->f = f;
-  filedup(f);     // increase the file's reference count
+  vma->f = file_ptr;
+  filedup(file_ptr); 
 
   return addr;
 }
 
-// lab10
 uint64 sys_munmap(void) {
   uint64 addr, va;
-  int len;
+  int length;
   struct proc *p = myproc();
   struct vm_area *vma = 0;
-  uint maxsz, n, n1;
+  uint max_write, n, n1;
   int i;
 
-  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0) {
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0) {
     return -1;
   }
-  if (addr % PGSIZE || len < 0) {
+  if (addr % PGSIZE || length < 0) {
     return -1;
   }
 
-  // find the VMA
-  for (i = 0; i < NVMA; ++i) {
+  for (i = 0; i < NVMA; i++) {
     if (p->vma[i].addr && addr >= p->vma[i].addr
-        && addr + len <= p->vma[i].addr + p->vma[i].len) {
+        && addr + length <= p->vma[i].addr + p->vma[i].len) {
       vma = &p->vma[i];
       break;
     }
@@ -578,22 +574,21 @@ uint64 sys_munmap(void) {
   if (!vma) {
     return -1;
   }
-
-  if (len == 0) {
+  if (length == 0) {
     return 0;
   }
 
-  if ((vma->flags & MAP_SHARED)) {
-    // the max size once can write to the disk
-    maxsz = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
-    for (va = addr; va < addr + len; va += PGSIZE) {
-      if (uvmgetdirty(p->pagetable, va) == 0) {
+  // MAP_SHARED
+  if (vma->flags & MAP_SHARED) {
+    max_write = ((MAXOPBLOCKS - 4) / 2) * BSIZE;
+    for (va = addr; va < addr + length; va += PGSIZE) {
+      if (!uvmgetdirty(p->pagetable, va)) {
         continue;
       }
-      // only write the dirty page back to the mapped file
-      n = min(PGSIZE, addr + len - va);
+
+      n = min(PGSIZE, addr + length - va);
       for (i = 0; i < n; i += n1) {
-        n1 = min(maxsz, n - i);
+        n1 = min(max_write, n - i);
         begin_op();
         ilock(vma->f->ip);
         if (writei(vma->f->ip, 1, va + i, va - vma->addr + vma->offset + i, n1) != n1) {
@@ -606,9 +601,10 @@ uint64 sys_munmap(void) {
       }
     }
   }
-  uvmunmap(p->pagetable, addr, (len - 1) / PGSIZE + 1, 1);
-  // update the vma
-  if (addr == vma->addr && len == vma->len) {
+  uvmunmap(p->pagetable, addr, (length - 1) / PGSIZE + 1, 1);
+
+  // upadte VMA
+  if (addr == vma->addr && length == vma->len) {
     vma->addr = 0;
     vma->len = 0;
     vma->offset = 0;
@@ -617,13 +613,14 @@ uint64 sys_munmap(void) {
     fileclose(vma->f);
     vma->f = 0;
   } else if (addr == vma->addr) {
-    vma->addr += len;
-    vma->offset += len;
-    vma->len -= len;
-  } else if (addr + len == vma->addr + vma->len) {
-    vma->len -= len;
+    vma->addr += length;
+    vma->offset += length;
+    vma->len -= length;
+  } else if (addr + length == vma->addr + vma->len) {
+    vma->len -= length;
   } else {
     panic("unexpected munmap");
   }
+
   return 0;
 }
